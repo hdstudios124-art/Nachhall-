@@ -6,6 +6,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#080f14">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon.png">
 <title>Nachhall</title>
 <style>
   :root{
@@ -138,7 +140,7 @@
   <p class="muted">Wie sollen dich andere sehen?</p>
   <input id="nameinput" maxlength="12" placeholder="Name" autocomplete="off" autocorrect="off" spellcheck="false">
   <button class="primary" id="namego">Netz betreten</button>
-  <p class="muted" style="margin-top:14px">Name, Punktzahl und deine aufgezeichneten Läufe sind für alle anderen Spieler sichtbar.</p>
+  <p class="muted" style="margin-top:14px">Dein Fortschritt bleibt auf diesem Gerät gespeichert.</p>
 </div>
 
 <!-- ============ MENÜ ============ -->
@@ -154,7 +156,7 @@
   <button class="primary" id="play">Lauf starten</button>
   <div class="row">
     <button class="ghostbtn" id="bq">Aufträge<br><span class="num" id="qcount" style="color:var(--dim);font-size:12px"></span></button>
-    <button class="ghostbtn" id="bl">Rangliste</button>
+    <button class="ghostbtn" id="bl">Bestenliste</button>
     <button class="ghostbtn" id="bs">Spuren</button>
   </div>
   <div class="footline">
@@ -194,17 +196,16 @@
 "use strict";
 
 /* ================= Speicher ================= */
-const mem = {};
-const hasStore = typeof window !== "undefined" && window.storage && typeof window.storage.get === "function";
+/* Speicher: lokal auf dem Gerat.
+   Fuer ein echtes Netz (Geister + Rangliste aller Spieler) spaeter hier
+   ein Backend einhaengen (z.B. Supabase) und DB.get/set auf fetch umstellen. */
 const DB = {
   async get(k, shared){
-    if(!hasStore) return mem[(shared?"s:":"p:")+k] ?? null;
-    try{ const r = await window.storage.get(k, !!shared); return r ? JSON.parse(r.value) : null; }
+    try{ const v = localStorage.getItem((shared?"netz:":"ich:")+k); return v ? JSON.parse(v) : null; }
     catch(e){ return null; }
   },
   async set(k, v, shared){
-    if(!hasStore){ mem[(shared?"s:":"p:")+k] = v; return true; }
-    try{ await window.storage.set(k, JSON.stringify(v), !!shared); return true; }
+    try{ localStorage.setItem((shared?"netz:":"ich:")+k, JSON.stringify(v)); return true; }
     catch(e){ return false; }
   }
 };
@@ -361,18 +362,16 @@ async function uploadRun(path, score){
   cur.push({n:P.name, p:path, t:P.trail, s:score, d:Date.now()});
   const trimmed = cur.slice(-45);
   await DB.set(K_GHOSTS, trimmed, true);
-  return trimmed.filter(g=>!g.echo && g.n !== P.name).length;
+  return trimmed.filter(g=>!g.echo).length;
 }
 async function submitScore(score){
   const b = (await DB.get(K_BOARD, true)) || [];
-  const mine = b.find(e=>e.n===P.name);
-  if(mine){ if(score>mine.s){ mine.s=score; mine.d=Date.now(); } }
-  else b.push({n:P.name, s:score, d:Date.now()});
+  b.push({n:P.name, s:score, d:Date.now()});
   b.sort((a,c)=>c.s-a.s);
   const top = b.slice(0,60);
   await DB.set(K_BOARD, top, true);
   boardCache = top;
-  return top.findIndex(e=>e.n===P.name) + 1;
+  return top.findIndex(e=>e.s===score) + 1;
 }
 
 /* ================= Spielzustand ================= */
@@ -687,7 +686,7 @@ async function die(){
   const hunters = await uploadRun(G.rec.slice(), score);
   const rank = await submitScore(score);
   relay.innerHTML = score >= 3
-    ? "Dein Geist läuft jetzt im Netz. <b>"+hunters+"</b> fremde Aufzeichnungen jagen neben ihm. Platz <b>"+rank+"</b> in der Rangliste."
+    ? "Lauf archiviert. <b>"+hunters+"</b> Aufzeichnungen jagen jetzt im Feld. Platz <b>"+rank+"</b> deiner Bestenliste."
     : relay.innerHTML;
   await loadPool();
 }
@@ -814,7 +813,7 @@ function openQuests(){
 
 function openBoard(){
   const b = boardCache.slice(0,25);
-  let h = '<h3>Rangliste</h3><p class="lead">Bestwert aller Spieler im Netz.</p>';
+  let h = '<h3>Bestenliste</h3><p class="lead">Deine besten Läufe auf diesem Gerät.</p>';
   if(b.length === 0) h += '<p class="muted">Noch keine Einträge. Der erste Lauf gehört dir.</p>';
   b.forEach((e,i)=>{
     const me = e.n === P.name;
@@ -822,8 +821,6 @@ function openBoard(){
       + '<div class="grow"><div class="t'+(me?" me":"")+'">'+esc(e.n)+'</div></div>'
       + '<div class="num" style="font-size:18px">'+e.s+'</div></div>';
   });
-  const mine = boardCache.findIndex(e=>e.n===P.name);
-  if(mine >= 25) h += '<p class="muted" style="margin-top:14px">Dein Platz: '+(mine+1)+'</p>';
   h += '<button class="close">Zurück</button>';
   openSheet(h);
 }
@@ -889,6 +886,7 @@ async function boot(){
   if(!P || !P.name){ show("intro"); document.getElementById("nameinput").focus(); }
   else { if(!Array.isArray(P.quests)) P.quests = buildQuests(dayIndex()); toMenu(); }
 }
+if("serviceWorker" in navigator){ navigator.serviceWorker.register("sw.js").catch(function(){}); }
 boot();
 })();
 </script>
